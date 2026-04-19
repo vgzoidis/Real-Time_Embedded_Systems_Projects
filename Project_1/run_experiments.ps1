@@ -1,5 +1,5 @@
 $producers = 4
-$consumersList = @(1, 2, 3, 4, 6, 8, 12, 16, 32)
+$consumersList = @(1, 2, 4, 8, 12, 16, 32, 64, 128)
 $iterations = 10 # 10 runs per configuration to average out the non-deterministic nature of the thread scheduling
 $executable = ".\prod-cons.exe"
 
