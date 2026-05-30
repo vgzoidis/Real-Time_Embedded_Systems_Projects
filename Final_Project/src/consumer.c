@@ -58,8 +58,8 @@ void* consumer_thread(void* arg) {
         size_t payload_len = 0;
         
         // This will block (sleep) via pthread_cond_wait if the buffer is empty.
-        // It wakes up instantly when the producer calls buffer_push().
-        if (buffer_pop(&state->buffer, local_payload, &payload_len)) {
+        // It wakes up instantly when the producer calls buffer_push() or when shutting down.
+        if (buffer_pop(state, local_payload, &payload_len)) {
             // As per instructions: no printf() or file logging in this thread!
             // Just parse the message and bump the metrics.
             parse_and_categorize(state, local_payload);

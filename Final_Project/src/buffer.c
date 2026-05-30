@@ -21,14 +21,17 @@ void destroy_app_state(AppState *state) {
     pthread_mutex_destroy(&state->counters_mutex);
 }
 
-bool buffer_push(CircularBuffer *cb, const char *payload, size_t len) {
+bool buffer_push(AppState *state, const char *payload, size_t len) {
+    CircularBuffer *cb = &state->buffer;
     pthread_mutex_lock(&cb->mutex);
     
-    // If buffer is full, we must drop the packet or wait.
-    // In a real-time producer, dropping is sometimes preferred to blocking the network,
-    // but the assignment states the producer wakes the consumer. We will block if full.
-    while (cb->count == BUFFER_CAPACITY) {
+    while (cb->count == BUFFER_CAPACITY && state->keep_running) {
         pthread_cond_wait(&cb->not_full, &cb->mutex);
+    }
+    
+    if (!state->keep_running) {
+        pthread_mutex_unlock(&cb->mutex);
+        return false;
     }
     
     // Copy data into the circular buffer
@@ -46,11 +49,17 @@ bool buffer_push(CircularBuffer *cb, const char *payload, size_t len) {
     return true;
 }
 
-bool buffer_pop(CircularBuffer *cb, char *output, size_t *out_len) {
+bool buffer_pop(AppState *state, char *output, size_t *out_len) {
+    CircularBuffer *cb = &state->buffer;
     pthread_mutex_lock(&cb->mutex);
     
-    while (cb->count == 0) {
+    while (cb->count == 0 && state->keep_running) {
         pthread_cond_wait(&cb->not_empty, &cb->mutex);
+    }
+    
+    if (cb->count == 0 && !state->keep_running) {
+        pthread_mutex_unlock(&cb->mutex);
+        return false;
     }
     
     // Copy data out

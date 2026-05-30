@@ -13,15 +13,11 @@ print("Loading Real-Time Analytics from:", metrics_file)
 
 # Load the CSV
 try:
-    df = pd.read_csv(metrics_file)
+    expected_columns = ['Seconds', 'Nanoseconds', 'Commit_Count', 'Identity_Count', 'Account_Count', 'Info_Count', 'Buffer_Occupancy_Pct', 'CPU_Pct']
+    df = pd.read_csv(metrics_file, header=None, names=expected_columns)
 except Exception as e:
     print(f"Error loading CSV data: {e}")
     exit(1)
-
-# Ensure columns are what we expect
-expected_columns = ['Seconds', 'Nanoseconds', 'Commit_Count', 'Identity_Count', 'Account_Count', 'Info_Count', 'Buffer_Occupancy_Pct', 'CPU_Pct']
-if list(df.columns) != expected_columns:
-    print(f"Warning: Columns might not match perfectly.\nExpected: {expected_columns}\nFound: {list(df.columns)}")
 
 # Calculate the Jitter
 # Ideal delta is exactly 1.000000000 seconds (1,000,000,000 ns).
@@ -44,7 +40,7 @@ plt.xlabel('Execution Window (Seconds)')
 plt.ylabel('Jitter (Milliseconds)')
 plt.grid(True)
 plt.tight_layout()
-plt.savefig('Chart_1_Jitter_Analysis.png')
+plt.savefig('../docs/Chart_1_Jitter_Analysis.png')
 print("Saved Chart_1_Jitter_Analysis.png")
 
 # --- Plot 2: Burstiness (Hz vs Buffer) ---
@@ -64,7 +60,7 @@ ax2.set_ylim(0, 100) # Buffer is strictly 0 to 100%
 
 fig.tight_layout()  
 plt.title('Network Burstiness vs Ring Buffer Occupancy')
-plt.savefig('Chart_2_Burstiness.png')
+plt.savefig('../docs/Chart_2_Burstiness.png')
 print("Saved Chart_2_Burstiness.png")
 
 # --- Plot 3: Network Hz vs CPU Usage ---
@@ -84,7 +80,7 @@ ax2.set_ylim(0, 100)
 
 fig.tight_layout()  
 plt.title('Incoming Messages Rate (Hz) vs CPU Utilization')
-plt.savefig('Chart_3_CPU_Usage.png')
+plt.savefig('../docs/Chart_3_CPU_Usage.png')
 print("Saved Chart_3_CPU_Usage.png")
 
 print("Analysis successfully rendered!")

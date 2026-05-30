@@ -6,3 +6,8 @@
 *.exe
 *.out
 *.app
+
+# Final Project Ignores
+telemetry_logger
+obj/
+venv/

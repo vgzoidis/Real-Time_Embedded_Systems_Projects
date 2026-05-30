@@ -26,7 +26,11 @@ It is highly recommended to use a virtual environment.
 ```bash
 cd scripts
 python -m venv venv
+# On Linux/WSL/Mac:
 source venv/bin/activate
+# On Windows PowerShell:
+.\venv\Scripts\activate
+
 pip install -r requirements.txt
 ```
 
@@ -58,7 +62,11 @@ While running, the `Monitor` thread will write CSV-style data into `metrics_log.
 After terminating the logger, you can generate the analytical graphs:
 ```bash
 cd scripts
+# On Linux/WSL/Mac:
 source venv/bin/activate
+# On Windows PowerShell:
+.\venv\Scripts\activate
+
 python analyze_metrics.py
 ```
 This will read from `../metrics_log.txt` and generate `performance_report.png` showcasing the CPU utilization versus Event Throughput over time.

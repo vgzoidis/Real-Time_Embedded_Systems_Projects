@@ -32,13 +32,6 @@ void* monitor_thread(void* arg) {
         perror("Failed to open metrics_log.txt");
         return NULL;
     }
-    
-    // Print CSV header if the file is empty/new
-    fseek(fp, 0, SEEK_END);
-    if (ftell(fp) == 0) {
-        fprintf(fp, "Seconds,Nanoseconds,Commit_Count,Identity_Count,Account_Count,Info_Count,Buffer_Occupancy_Pct,CPU_Pct\n");
-        fflush(fp);
-    }
 
     CpuState cpu_state = {0};
     read_cpu_state(&cpu_state.prev_total, &cpu_state.prev_idle);

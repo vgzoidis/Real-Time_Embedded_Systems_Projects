@@ -27,6 +27,9 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-        @mkdir -p $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
+clean:
+	rm -rf $(OBJ_DIR) $(TARGET)
 .PHONY: all clean

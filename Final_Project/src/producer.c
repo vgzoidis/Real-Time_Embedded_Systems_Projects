@@ -23,7 +23,7 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
             if (global_app_state && len > 0) {
                 // Determine if we have a full payload (we assume mostly complete text frames for simplicity)
                 // In production lws, you might need to handle fragmented payloads.
-                buffer_push(&global_app_state->buffer, (const char *)in, len);
+                buffer_push(global_app_state, (const char *)in, len);
             }
             break;
 

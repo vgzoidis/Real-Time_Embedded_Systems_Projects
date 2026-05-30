@@ -50,8 +50,8 @@ void init_app_state(AppState *state);
 void destroy_app_state(AppState *state);
 
 // Buffer operations
-bool buffer_push(CircularBuffer *cb, const char *payload, size_t len);
-bool buffer_pop(CircularBuffer *cb, char *output, size_t *out_len);
+bool buffer_push(AppState *state, const char *payload, size_t len);
+bool buffer_pop(AppState *state, char *output, size_t *out_len);
 float get_buffer_occupancy_pct(CircularBuffer *cb);
 
 // Thread entry points
