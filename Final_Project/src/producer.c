@@ -2,17 +2,21 @@
 #include <libwebsockets.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #define FIREHOSE_URL "jetstream1.us-east.bsky.network"
 #define FIREHOSE_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
 
 static AppState *global_app_state = NULL;
+static volatile int needs_reconnect = 0;
 
 /* 
  * libwebsockets callback for handling WebSocket events 
  */
 static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
                              void *user, void *in, size_t len) {
+    (void)wsi;
+    (void)user;
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("[Producer] Connected to Jetstream Firehose.\n");
@@ -40,22 +44,12 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             printf("[Producer] Connection Error: %s\n", in ? (char *)in : "(null)");
-            global_app_state->keep_running = false;
-            // Wake up resting threads so they can exit their loops safely without hanging
-            pthread_mutex_lock(&global_app_state->buffer.mutex);
-            pthread_cond_broadcast(&global_app_state->buffer.not_empty);
-            pthread_cond_broadcast(&global_app_state->buffer.not_full);
-            pthread_mutex_unlock(&global_app_state->buffer.mutex);
+            needs_reconnect = 1;
             break;
 
         case LWS_CALLBACK_CLOSED:
             printf("[Producer] Connection Closed.\n");
-            global_app_state->keep_running = false;
-            // Wake up resting threads so they can exit their loops safely without hanging
-            pthread_mutex_lock(&global_app_state->buffer.mutex);
-            pthread_cond_broadcast(&global_app_state->buffer.not_empty);
-            pthread_cond_broadcast(&global_app_state->buffer.not_full);
-            pthread_mutex_unlock(&global_app_state->buffer.mutex);
+            needs_reconnect = 1;
             break;
 
         default:
@@ -69,12 +63,17 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
  */
 static struct lws_protocols protocols[] = {
     {
-        "firehose-protocol",
-        callback_firehose,
-        0,
-        MAX_PAYLOAD_SIZE,
+        .name = "firehose-protocol",
+        .callback = callback_firehose,
+        .per_session_data_size = 0,
+        .rx_buffer_size = MAX_PAYLOAD_SIZE,
     },
-    { NULL, NULL, 0, 0 } /* terminator */
+    {
+        .name = NULL,
+        .callback = NULL,
+        .per_session_data_size = 0,
+        .rx_buffer_size = 0,
+    } /* terminator */
 };
 
 void* producer_thread(void* arg) {
@@ -109,16 +108,26 @@ void* producer_thread(void* arg) {
     
     struct lws *wsi = lws_client_connect_via_info(&ccinfo);
     if (!wsi) {
-        fprintf(stderr, "[Producer] Failed to connect to firehose\n");
-        lws_context_destroy(context);
-        global_app_state->keep_running = false;
-        return NULL;
+        fprintf(stderr, "[Producer] Failed to connect to firehose. Will keep trying...\n");
+        needs_reconnect = 1;
     }
     
     printf("[Producer] Starting event loop...\n");
     
     // Asynchronous lws event loop
     while (global_app_state->keep_running) {
+        if (needs_reconnect) {
+            printf("[Producer] Attempting to reconnect to Jetstream Firehose in 3 seconds...\n");
+            needs_reconnect = 0;
+            sleep(3);
+            if (global_app_state->keep_running) {
+                wsi = lws_client_connect_via_info(&ccinfo);
+                if (!wsi) {
+                    fprintf(stderr, "[Producer] Reconnect failed. Will keep trying...\n");
+                    needs_reconnect = 1;
+                }
+            }
+        }
         lws_service(context, 50); // wait up to 50ms for events
     }
     
