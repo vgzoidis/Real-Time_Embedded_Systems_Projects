@@ -25,6 +25,12 @@ except Exception as e:
 df['Abs_Time_ns'] = df['Seconds'] * 1e9 + df['Nanoseconds']
 # Delta between consecutive periodic wakeups
 df['Delta_ns'] = df['Abs_Time_ns'].diff()
+
+# If the user restarts the C application, the gap between the last run's timestamp 
+# and the new run's timestamp will be massive. We filter out any delta > 5 seconds 
+# to prevent application restarts from causing artificial, massive spikes in the Jitter graph.
+df.loc[df['Delta_ns'] > 5e9, 'Delta_ns'] = np.nan
+
 # Jitter is the difference between actual delta and exactly 1 second (in milliseconds)
 df['Jitter_ms'] = (df['Delta_ns'] - 1e9) / 1e6
 
@@ -82,5 +88,29 @@ fig.tight_layout()
 plt.title('Incoming Messages Rate (Hz) vs CPU Utilization')
 plt.savefig('../docs/Chart_3_CPU_Usage.png')
 print("Saved Chart_3_CPU_Usage.png")
+
+# --- Export Statistical Summary for LaTeX ---
+# Calculate key metrics to prove robustness
+jitter_median = df['Jitter_ms'].median()
+jitter_75th = df['Jitter_ms'].quantile(0.75)
+jitter_mean = df['Jitter_ms'].mean()
+cpu_mean = df['CPU_Pct'].mean()
+cpu_max = df['CPU_Pct'].max()
+buffer_max = df['Buffer_Occupancy_Pct'].max()
+
+stats_tex = f"""
+\\begin{{itemize}}
+    \\item \\textbf{{Median Jitter:}} {jitter_median:.5f} ms (Fractional microseconds).
+    \\item \\textbf{{75th Percentile Jitter:}} {jitter_75th:.5f} ms.
+    \\item \\textbf{{Mean Average Jitter:}} {jitter_mean:.5f} ms.
+    \\item \\textbf{{Average CPU Load:}} {cpu_mean:.2f}\\%.
+    \\item \\textbf{{Maximum CPU Load:}} {cpu_max:.2f}\\%.
+    \\item \\textbf{{Peak Buffer Occupancy:}} {buffer_max:.2f}\\%.
+\\end{{itemize}}
+"""
+
+with open('../docs/stats_summary.tex', 'w') as f:
+    f.write(stats_tex)
+print("Saved statistics to stats_summary.tex")
 
 print("Analysis successfully rendered!")

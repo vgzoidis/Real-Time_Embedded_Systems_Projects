@@ -43,6 +43,15 @@ void* monitor_thread(void* arg) {
         // Strict absolute time progression (+1 second)
         next_wake_time.tv_sec += 1;
         
+        // If the system was suspended (e.g., laptop sleep or massive I/O block), 
+        // the clock can fall far behind. To prevent an infinite "catch-up" spin 
+        // that ruins the Jitter telemetry, we leap over the missed gap.
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        if (now.tv_sec > next_wake_time.tv_sec + 1) {
+            next_wake_time.tv_sec = now.tv_sec + 1;
+        }
+
         // This stops clock drift entirely over 24h
         clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next_wake_time, NULL);
         
