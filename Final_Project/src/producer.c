@@ -3,12 +3,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
 #define FIREHOSE_URL "jetstream1.us-east.bsky.network"
 #define FIREHOSE_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
+#define RECONNECT_DELAY_SEC 3
+#define RX_STALL_TIMEOUT_SEC 12
 
 static AppState *global_app_state = NULL;
 static volatile int needs_reconnect = 0;
+static volatile time_t last_rx_ts = 0;
+static struct lws *current_wsi = NULL;
 
 /* 
  * libwebsockets callback for handling WebSocket events 
@@ -20,6 +25,8 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("[Producer] Connected to Jetstream Firehose.\n");
+            current_wsi = wsi;
+            last_rx_ts = time(NULL);
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
@@ -39,16 +46,19 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
                  * will safely exit and tick the `info` counter, naturally acting as dropped packets.
                  */
                 buffer_push(global_app_state, (const char *)in, len);
+                last_rx_ts = time(NULL);
             }
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             printf("[Producer] Connection Error: %s\n", in ? (char *)in : "(null)");
+            current_wsi = NULL;
             needs_reconnect = 1;
             break;
 
         case LWS_CALLBACK_CLOSED:
             printf("[Producer] Connection Closed.\n");
+            current_wsi = NULL;
             needs_reconnect = 1;
             break;
 
@@ -78,6 +88,7 @@ static struct lws_protocols protocols[] = {
 
 void* producer_thread(void* arg) {
     global_app_state = (AppState*)arg;
+    last_rx_ts = time(NULL);
     
     struct lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
@@ -116,10 +127,19 @@ void* producer_thread(void* arg) {
     
     // Asynchronous lws event loop
     while (global_app_state->keep_running) {
+        time_t now = time(NULL);
+
+        if (current_wsi && (now - last_rx_ts) > RX_STALL_TIMEOUT_SEC) {
+            printf("[Producer] Receive stall detected (%lds). Forcing reconnect...\n", (long)(now - last_rx_ts));
+            needs_reconnect = 1;
+            lws_set_timeout(current_wsi, PENDING_TIMEOUT_CLOSE_SEND, 1);
+            current_wsi = NULL;
+        }
+
         if (needs_reconnect) {
-            printf("[Producer] Attempting to reconnect to Jetstream Firehose in 3 seconds...\n");
+            printf("[Producer] Attempting to reconnect to Jetstream Firehose in %d seconds...\n", RECONNECT_DELAY_SEC);
             needs_reconnect = 0;
-            sleep(3);
+            sleep(RECONNECT_DELAY_SEC);
             if (global_app_state->keep_running) {
                 wsi = lws_client_connect_via_info(&ccinfo);
                 if (!wsi) {

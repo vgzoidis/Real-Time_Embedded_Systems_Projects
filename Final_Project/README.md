@@ -76,16 +76,75 @@ To run the telemetry logger on the Pi:
 ```bash
 ./telemetry_logger
 ```
-*Note: Due to the 24-hour operational requirement, you might want to run this inside a `tmux` or `screen` session to prevent unexpected terminal closures from killing the process.*
+*For headless deployments without installing extra tools, use `nohup` and a pid file so the process survives SSH disconnects.*
+
+```bash
+nohup ./telemetry_logger > telemetry_logger.out 2>&1 < /dev/null &
+echo $! > telemetry_logger.pid
+```
 
 You can gracefully stop the process at any time by pressing `CTRL+C`. The daemon catches `SIGINT`, triggers a safe teardown of the websocket loop, frees the buffer contents, and exits the threads without corrupting memory.
+
+To stop a background run started with `nohup`:
+```bash
+kill -INT $(cat telemetry_logger.pid)
+```
 
 ### Self-Healing Reconnection Strategy
 The application logic features a robust, self-healing producer thread. To test this on a headless device without losing your SSH session:
 1. Start the application (`./telemetry_logger`).
-2. Simulate a WAN network drop by unplugging your router's external internet cable, OR by temporarily dropping outbound packets to the Firehose via `iptables` (`sudo iptables -A OUTPUT -p tcp -d jetstream1.us-east.bsky.network -j DROP`). Do **not** execute `sudo ifconfig wlan0 down`, or you will instantly drop your SSH session!
-3. Observe the console: The `libwebsockets` library will catch the connection error and cleanly close the socket. The outer C tracking loop will automatically assert a reconnect flag and attempt to re-dial the Firehose every 3 seconds.
-4. Restore the internet connection (plug the cable back in, or execute `sudo iptables -D OUTPUT -p tcp -d jetstream1.us-east.bsky.network -j DROP`). The application will seamlessly recover, reconnect, and resume logging without needing a process restart.
+2. Resolve the Firehose IP on the Pi:
+   ```bash
+   getent hosts jetstream1.us-east.bsky.network
+   ```
+3. Simulate a WAN-only outage (without dropping LAN/SSH) using a blackhole route:
+   ```bash
+   sudo ip route add blackhole <JETSTREAM_IP>/32
+   ```
+   Do **not** execute `sudo ifconfig wlan0 down`, or you will instantly drop your SSH session.
+4. Observe reconnect behavior from the log file (no terminal multiplexer needed):
+   ```bash
+   tail -n 120 telemetry_logger.out
+   ```
+5. Restore connectivity:
+   ```bash
+   sudo ip route del blackhole <JETSTREAM_IP>/32
+   ```
+   The application reconnects and continues without restart.
+
+### Router-Unplug Outage Test (Full WiFi/Internet Loss)
+You can also unplug the router to simulate a real outage. In this scenario, TCP sessions may not close instantly, so the producer now includes a receive-stall watchdog:
+- If no frames are received for 12 seconds, the logger forces socket close and enters reconnect mode.
+- Reconnect attempts run every 3 seconds until the link is back.
+
+Headless-safe test flow:
+1. Start logger with no-install background mode:
+   ```bash
+   nohup ./telemetry_logger > telemetry_logger.out 2>&1 < /dev/null &
+   echo $! > telemetry_logger.pid
+   ```
+2. Unplug router WAN or power-cycle router.
+3. After ~12 seconds of silence, expect log line similar to: `Receive stall detected (...)`.
+4. Replug router and wait; expect reconnect attempts and then `Connected to Jetstream Firehose.` without restarting the process.
+
+Quick runtime checks:
+```bash
+ls
+ps aux | grep '[t]elemetry_logger'
+cat telemetry_logger.pid
+tail -n 120 telemetry_logger.out
+```
+
+#### Observed Validation (Real Pi Run)
+In a successful headless test, `metrics_log.txt` showed normal traffic, then a forced outage window with zero processed events, followed by automatic recovery:
+- Normal flow before outage: timestamps `1780166899` to `1780166922` had sustained non-zero event counts.
+- Outage window: timestamps `1780166923` through `1780167017` were near-zero / zero event counts.
+- Recovery after link restoration: from `1780167018` onward, events resumed (e.g., `10, 48, 37, 60, ...`), proving reconnection without process restart.
+
+Corresponding producer log evidence from `telemetry_logger.out`:
+- `Receive stall detected (18s). Forcing reconnect...`
+- repeated reconnect attempts (`Attempting to reconnect...`, `Connection Error: Closed before conn`)
+- eventual success: `Connected to Jetstream Firehose.`
 
 ## 📊 Analytics and Reporting
 

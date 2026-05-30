@@ -80,10 +80,75 @@ Long-running remote connections are frequently severed by cloud load balancers o
 
 To guarantee fault-resilience without aggressive polling, the architecture employs a robust Self-Healing Reconnection Strategy. The internal \texttt{libwebsockets} network-closure callbacks (\texttt{LWS\_CALLBACK\_CLOSED} and \texttt{LWS\_CALLBACK\_CLIENT\_CONNECTION\_ERROR}) intercept the broken pipes but intentionally \textit{do not} trigger a full application shutdown. Instead, they assert a volatile \texttt{needs\_reconnect} state flag. The outer asynchronous event loop evaluates this flag, idles the producer thread for three seconds to prevent aggressive network polling on dead interfaces, and dynamically re-allocates a new connection via \texttt{lws\_client\_connect\_via\_info}.
 
+An additional receive-stall watchdog was implemented for realistic router-outage cases where kernel TCP state can remain half-open and no closure callback arrives immediately. If no payload is received for 12 seconds, the producer force-closes the active socket and transitions into the same reconnect loop (3-second retry cadence). This guarantees recovery even when link loss is silent at transport level.
+
 \subsubsection{Validating Reconnection on Headless Hardware}
 Testing network resilience on a headless embedded device poses a unique challenge: forcefully disabling the \texttt{wlan0} Wi-Fi interface (e.g., via \texttt{ifconfig down}) immediately kills the developer's active SSH session, preventing observation of the recovery logs. 
-To rigorously test the self-healing telemetry logger while preserving the SSH trace, we simulated WAN constraints by leveraging kernel-level \texttt{iptables}. 
-By dynamically dropping external TCP traffic destined specifically for the Firehose architecture (\texttt{sudo iptables -A OUTPUT -p tcp -d jetstream1.us-east.bsky.network -j DROP}), the SSH session remained securely established on the Local Area Network (LAN). The \texttt{libwebsockets} thread correctly caught the simulated WAN severance, emitted an error trace, and cleanly transitioned into its 3-second redial loop. Upon executing the \texttt{iptables} removal rule, the C-backend instantly restored the WebSocket context, recovering the inbound data stream indefinitely without requiring a system restart.
+To rigorously test the self-healing telemetry logger while preserving the SSH trace, we simulated WAN constraints by adding a destination-specific blackhole route to the Firehose IP via \texttt{iproute2}. 
+After resolving \texttt{jetstream1.us-east.bsky.network} to an IPv4 endpoint, we injected \texttt{sudo ip route add blackhole <ip>/32}. This blocked only outbound traffic to the Firehose while preserving LAN-level SSH connectivity. The \texttt{libwebsockets} thread correctly caught the severance, emitted an error trace, and entered the 3-second redial loop. After removing the route (\texttt{sudo ip route del blackhole <ip>/32}), the C-backend re-established the WebSocket context without any process restart.
+
+For deployment-grade headless testing without installing extra software, the logger was launched using \texttt{nohup} and a PID file:
+\begin{minted}{bash}
+nohup ./telemetry_logger > telemetry_logger.out 2>&1 < /dev/null &
+echo $! > telemetry_logger.pid
+\end{minted}
+This method keeps execution alive across SSH disconnects and allows direct observability via \texttt{tail telemetry\_logger.out} and process inspection via \texttt{ps aux | grep '[t]elemetry\_logger'}.
+
+Empirical evidence from \texttt{metrics\_log.txt} confirms this behavior. During a real headless run, timestamps \texttt{1780165403} through \texttt{1780165412} contained zero events (forced outage window), while immediately after restoration, timestamps \texttt{1780165414} and \texttt{1780165415} jumped to \texttt{308} and \texttt{360} events respectively. This validates that reconnection was automatic and stable under induced network fault conditions.
+
+In a later no-install validation run on the Raspberry Pi Zero W, the same pattern was reproduced with longer outage duration: high, stable traffic from \texttt{1780166899} to \texttt{1780166922}, an outage/near-zero period from \texttt{1780166923} to \texttt{1780167017}, and immediate recovery from \texttt{1780167018} onward (e.g., \texttt{10, 48, 37, 60, ...} events). The producer log simultaneously reported:
+\begin{minted}{text}
+[Producer] Receive stall detected (18s). Forcing reconnect...
+[Producer] Attempting to reconnect to Jetstream Firehose in 3 seconds...
+[Producer] Connection Error: Closed before conn
+...
+[Producer] Connected to Jetstream Firehose.
+\end{minted}
+This constitutes direct behavioral proof that the reconnection loop converges after real router outage conditions. The observed 18-second stall age is greater than the 12-second watchdog threshold because detection is evaluated on the next event-loop iteration and then followed by the 3-second reconnect backoff.
+
+\paragraph{Raw sinkhole-route evidence.}
+\begin{minted}{text}
+1780165393,143025266,1,0,0,0,0.00,55.56
+1780165394,143015517,49,0,0,0,0.00,10.20
+...
+1780165402,143033129,7,0,0,0,0.00,25.81
+1780165403,143043927,0,0,0,0,0.00,1.09
+1780165404,143032477,0,0,0,0,0.00,4.00
+...
+1780165412,143007578,0,0,0,0,0.00,4.26
+1780165413,143022158,3,0,0,0,0.00,4.90
+1780165414,144031510,308,3,3,2,0.00,22.68
+1780165415,142998584,360,3,3,0,0.00,27.55
+1780165416,143018397,29,1,1,0,0.00,20.95
+\end{minted}
+
+\paragraph{Raw router-unplug evidence.}
+\begin{minted}{text}
+vgzoidis@vzpi:~ $ ls
+metrics_log.txt  telemetry_logger  telemetry_logger.out  telemetry_logger.pid
+
+vgzoidis@vzpi:~ $ ps aux | grep [t]elemetry_logger
+vgzoidis  1134  2.2  2.8  40524 12388 pts/1 Sl 21:48   0:03 ./telemetry_logger
+
+vgzoidis@vzpi:~ $ cat telemetry_logger.pid
+1134
+
+vgzoidis@vzpi:~ $ pkill -f telemetry_logger
+
+vgzoidis@vzpi:~ $ cat metrics_log.txt
+1780166922,299939193,4,0,0,0,0.00,4.90
+1780166923,299935969,0,0,0,0,0.00,0.00
+1780166924,299927744,0,0,0,0,0.00,2.97
+...
+1780167016,299916647,0,0,0,0,0.00,38.00
+1780167017,299919452,0,0,0,0,0.00,69.00
+1780167018,299917258,10,0,0,0,0.00,74.51
+1780167019,299914063,48,0,0,0,0.00,67.65
+1780167020,299953871,37,0,1,0,0.00,74.23
+1780167021,299933676,60,1,2,0,0.00,100.00
+\end{minted}
+
+To finalize the run, the background process can be terminated cleanly with \texttt{kill -INT \$(cat telemetry\_logger.pid)}, which triggers the application's graceful shutdown path.
 
 \subsection{Memory Management and Buffer Sizing}
 Due to the constraints of the Raspberry Pi Zero W and the 24-hour uptime requirement, memory fragmentation limits were enforced:
