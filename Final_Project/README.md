@@ -72,23 +72,25 @@ A Raspberry Pi Zero W has limited RAM and processing power, making direct compil
 
 ## 🏃 Execution & Reconnection Testing
 
-To run the telemetry logger on the Pi:
-```bash
-./telemetry_logger
-```
-*For headless deployments without installing extra tools, use `nohup` and a pid file so the process survives SSH disconnects.*
+To run the telemetry logger on the Pi (headless):
+
+Use `nohup` so the process outlives your SSH session and continues running in the background. Example:
 
 ```bash
+# start in background and detach from the session
 nohup ./telemetry_logger > telemetry_logger.out 2>&1 < /dev/null &
 echo $! > telemetry_logger.pid
 ```
 
-You can gracefully stop the process at any time by pressing `CTRL+C`. The daemon catches `SIGINT`, triggers a safe teardown of the websocket loop, frees the buffer contents, and exits the threads without corrupting memory.
+Notes:
+- `telemetry_logger.out` contains stdout/stderr; inspect it with `tail -n 200 telemetry_logger.out`.
+- To stop a background run started with `nohup` use the recorded PID:
 
-To stop a background run started with `nohup`:
 ```bash
 kill -INT $(cat telemetry_logger.pid)
 ```
+
+The application also supports an interactive shutdown (press `CTRL+C` when running foreground). The daemon handles `SIGINT`/`SIGTERM`, triggers an orderly teardown of the websocket loop, wakes waiting threads, flushes metrics, and exits cleanly.
 
 ### Self-Healing Reconnection Strategy
 The application logic features a robust, self-healing producer thread. To test this on a headless device without losing your SSH session:
@@ -129,10 +131,10 @@ Headless-safe test flow:
 
 Quick runtime checks:
 ```bash
-ls
+ls -l
 ps aux | grep '[t]elemetry_logger'
-cat telemetry_logger.pid
-tail -n 120 telemetry_logger.out
+ps -p $(cat telemetry_logger.pid) -o pid,etime,cmd
+tail -n 100 telemetry_logger.out
 ```
 
 #### Observed Validation (Real Pi Run)

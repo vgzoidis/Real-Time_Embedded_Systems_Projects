@@ -82,6 +82,17 @@ To guarantee fault-resilience without aggressive polling, the architecture emplo
 
 An additional receive-stall watchdog was implemented for realistic router-outage cases where kernel TCP state can remain half-open and no closure callback arrives immediately. If no payload is received for 12 seconds, the producer force-closes the active socket and transitions into the same reconnect loop (3-second retry cadence). This guarantees recovery even when link loss is silent at transport level.
 
+\subsection{Thread Safety and Producer State Protection}
+Producer-visible state that is touched by both the \texttt{libwebsockets} callbacks and the main producer event loop is explicitly protected to avoid race conditions. The following strategy was applied:
+\begin{itemize}
+  \item A small, dedicated mutex (``producer\_state\_mutex'') guards the trio of variables that must be updated atomically together: \texttt{current\_wsi}, \texttt{last\_rx\_ts}, and \texttt{needs\_reconnect}.
+  \item Callback handlers perform short locked updates when they accept or close a websocket session (for example, setting \texttt{current\_wsi = wsi} and resetting the reconnect flag).
+  \item The producer event loop takes the mutex briefly to snapshot these fields into local variables, then releases the lock while performing heavier logic (timeouts, sleeps, reconnect attempts). If the loop needs to modify shared state (force reconnect), it takes the mutex again for a short update.
+  \item This approach minimizes lock hold times, avoids complex atomic sequences across multiple fields, and keeps the code conservative and portable across different \texttt{libwebsockets} threading models.
+\end{itemize}
+
+In practice, mutex overhead is negligible relative to network I/O. The chosen pattern avoids subtle races that can occur if callbacks ever run on a different thread than the event loop, and it makes the reconnection logic deterministic and auditable for the 24-hour stability proof.
+
 \subsubsection{Validating Reconnection on Headless Hardware}
 Testing network resilience on a headless embedded device poses a unique challenge: forcefully disabling the \texttt{wlan0} Wi-Fi interface (e.g., via \texttt{ifconfig down}) immediately kills the developer's active SSH session, preventing observation of the recovery logs. 
 To rigorously test the self-healing telemetry logger while preserving the SSH trace, we simulated WAN constraints by adding a destination-specific blackhole route to the Firehose IP via \texttt{iproute2}. 

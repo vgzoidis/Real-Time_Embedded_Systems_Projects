@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
+#include <pthread.h>
 
 #define FIREHOSE_URL "jetstream1.us-east.bsky.network"
 #define FIREHOSE_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
@@ -11,6 +12,8 @@
 #define RX_STALL_TIMEOUT_SEC 12
 
 static AppState *global_app_state = NULL;
+/* small mutex to guard producer-visible state touched by callbacks and the event loop */
+static pthread_mutex_t producer_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int needs_reconnect = 0;
 static volatile time_t last_rx_ts = 0;
 static struct lws *current_wsi = NULL;
@@ -25,8 +28,11 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("[Producer] Connected to Jetstream Firehose.\n");
+            pthread_mutex_lock(&producer_state_mutex);
             current_wsi = wsi;
             last_rx_ts = time(NULL);
+            needs_reconnect = 0;
+            pthread_mutex_unlock(&producer_state_mutex);
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
@@ -46,20 +52,26 @@ static int callback_firehose(struct lws *wsi, enum lws_callback_reasons reason,
                  * will safely exit and tick the `info` counter, naturally acting as dropped packets.
                  */
                 buffer_push(global_app_state, (const char *)in, len);
+                pthread_mutex_lock(&producer_state_mutex);
                 last_rx_ts = time(NULL);
+                pthread_mutex_unlock(&producer_state_mutex);
             }
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             printf("[Producer] Connection Error: %s\n", in ? (char *)in : "(null)");
+            pthread_mutex_lock(&producer_state_mutex);
             current_wsi = NULL;
             needs_reconnect = 1;
+            pthread_mutex_unlock(&producer_state_mutex);
             break;
 
         case LWS_CALLBACK_CLOSED:
             printf("[Producer] Connection Closed.\n");
+            pthread_mutex_lock(&producer_state_mutex);
             current_wsi = NULL;
             needs_reconnect = 1;
+            pthread_mutex_unlock(&producer_state_mutex);
             break;
 
         default:
@@ -129,22 +141,45 @@ void* producer_thread(void* arg) {
     while (global_app_state->keep_running) {
         time_t now = time(NULL);
 
-        if (current_wsi && (now - last_rx_ts) > RX_STALL_TIMEOUT_SEC) {
-            printf("[Producer] Receive stall detected (%lds). Forcing reconnect...\n", (long)(now - last_rx_ts));
+        /* snapshot protected state under mutex to avoid races with callbacks */
+        pthread_mutex_lock(&producer_state_mutex);
+        struct lws *local_wsi = current_wsi;
+        time_t local_last_rx = last_rx_ts;
+        int local_needs_reconnect = needs_reconnect;
+        pthread_mutex_unlock(&producer_state_mutex);
+
+        if (local_wsi && (now - local_last_rx) > RX_STALL_TIMEOUT_SEC) {
+            printf("[Producer] Receive stall detected (%lds). Forcing reconnect...\n", (long)(now - local_last_rx));
+            pthread_mutex_lock(&producer_state_mutex);
             needs_reconnect = 1;
-            lws_set_timeout(current_wsi, PENDING_TIMEOUT_CLOSE_SEND, 1);
-            current_wsi = NULL;
+            if (current_wsi) {
+                lws_set_timeout(current_wsi, PENDING_TIMEOUT_CLOSE_SEND, 1);
+                current_wsi = NULL;
+            }
+            pthread_mutex_unlock(&producer_state_mutex);
         }
 
-        if (needs_reconnect) {
+        if (local_needs_reconnect) {
             printf("[Producer] Attempting to reconnect to Jetstream Firehose in %d seconds...\n", RECONNECT_DELAY_SEC);
+            /* clear the flag until we know the attempt succeeded or failed */
+            pthread_mutex_lock(&producer_state_mutex);
             needs_reconnect = 0;
+            pthread_mutex_unlock(&producer_state_mutex);
+
             sleep(RECONNECT_DELAY_SEC);
             if (global_app_state->keep_running) {
                 wsi = lws_client_connect_via_info(&ccinfo);
                 if (!wsi) {
                     fprintf(stderr, "[Producer] Reconnect failed. Will keep trying...\n");
+                    pthread_mutex_lock(&producer_state_mutex);
                     needs_reconnect = 1;
+                    pthread_mutex_unlock(&producer_state_mutex);
+                } else {
+                    pthread_mutex_lock(&producer_state_mutex);
+                    /* reset last_rx_ts on new connection */
+                    last_rx_ts = time(NULL);
+                    current_wsi = wsi;
+                    pthread_mutex_unlock(&producer_state_mutex);
                 }
             }
         }
