@@ -70,6 +70,45 @@ A Raspberry Pi Zero W has limited RAM and processing power, making direct compil
     ./telemetry_logger
     ```
 
+## 🛠️ Systemd Service (For Auto-Restarts and Robustness)
+
+To run the telemetry system safely on boot and to ensure it automatically recovers from unexpected reboots, crashes, or power failures, use the provided systemd service. Since the Pi Zero is running headless, deploying this service is the safest way to ensure the 24-hour log succeeds.
+
+1. **Adjust the Unit File for your User:**
+   Before copying, ensure `telemetry.service` points to the correct paths and user for your specific Raspberry Pi setup. For example, if your username is `vgzoidis`:
+   ```bash
+   # In scripts/telemetry.service, adjust User, Group, ExecStart and WorkingDirectory:
+   User=vgzoidis
+   Group=vgzoidis
+   ExecStart=/home/vgzoidis/Real-Time_Embedded_Systems_Projects/Final_Project/telemetry_logger
+   WorkingDirectory=/home/vgzoidis/Real-Time_Embedded_Systems_Projects/Final_Project
+   ```
+
+2. **Deploy to the Pi (via SSH/SCP):**
+   Copy the service file to your Pi:
+   ```bash
+   scp scripts/telemetry.service vgzoidis@192.168.X.X:~/
+   ```
+
+3. **Install and Enable on the Pi:**
+   SSH into your Pi and move the file to the systemd directory:
+   ```bash
+   ssh vgzoidis@192.168.X.X
+   sudo mv ~/telemetry.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable telemetry.service
+   ```
+
+4. **Start the Service:**
+   ```bash
+   sudo systemctl start telemetry.service
+   ```
+
+5. **Monitor & Manage:**
+   - Check status: `sudo systemctl status telemetry.service`
+   - Check logs: `sudo journalctl -u telemetry.service -f`
+   - Stop service: `sudo systemctl stop telemetry.service`
+
 ## 🏃 Execution & Reconnection Testing
 
 To run the telemetry logger on the Pi (headless):

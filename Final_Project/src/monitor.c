@@ -38,11 +38,12 @@ void* monitor_thread(void* arg) {
 
     struct timespec next_wake_time;
     clock_gettime(CLOCK_REALTIME, &next_wake_time);
+    
+    // Sync to the exact absolute top of the *next* second
+    next_wake_time.tv_sec += 1;
+    next_wake_time.tv_nsec = 0;
 
     while (state->keep_running) {
-        // Strict absolute time progression (+1 second)
-        next_wake_time.tv_sec += 1;
-        
         // If the system was suspended (e.g., laptop sleep or massive I/O block), 
         // the clock can fall far behind. To prevent an infinite "catch-up" spin 
         // that ruins the Jitter telemetry, we leap over the missed gap.
@@ -95,7 +96,11 @@ void* monitor_thread(void* arg) {
                 ts.tv_sec, ts.tv_nsec, 
                 snapshot_commit, snapshot_identity, snapshot_account, snapshot_info, 
                 buf_pct, cpu_pct);
-        fflush(fp); // Ensure it writes to SD card continuously
+        fflush(fp); // Ensure it writes to OS buffers
+        fdatasync(fileno(fp)); // Ensure OS physically flushes to SD card
+
+        // Schedule exact same time for the next second
+        next_wake_time.tv_sec += 1;
     }
 
     fclose(fp);
