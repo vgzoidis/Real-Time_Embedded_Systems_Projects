@@ -24,6 +24,16 @@ except Exception as e:
     print(f"Error loading CSV data: {e}")
     exit(1)
 
+# Coerce malformed or partially written rows to NaN, then drop them before plotting.
+# This keeps the analytics resilient if the logger is interrupted while appending.
+for column in expected_columns:
+    df[column] = pd.to_numeric(df[column], errors='coerce')
+
+df = df.dropna(subset=['Seconds', 'Nanoseconds', 'Commit_Count', 'Identity_Count', 'Account_Count', 'Info_Count', 'Buffer_Occupancy_Pct', 'CPU_Pct']).copy()
+if df.empty:
+    print("Error: metrics_log.txt did not contain any valid data rows.")
+    exit(1)
+
 # Calculate the Jitter
 # Ideal delta is exactly 1.000000000 seconds (1,000,000,000 ns).
 # First, create a continuous precise time array in absolute nanoseconds
@@ -45,6 +55,10 @@ df['Messages_Hz'] = df['Commit_Count'] + df['Identity_Count'] + df['Account_Coun
 # Convert Unix time to human-readable local time so the plots reflect the user's timezone.
 local_timezone = datetime.now().astimezone().tzinfo
 df['Local_Timestamp'] = pd.to_datetime(df['Seconds'], unit='s', utc=True).dt.tz_convert(local_timezone)
+df = df.dropna(subset=['Local_Timestamp']).copy()
+if df.empty:
+    print("Error: no valid timestamps were found in metrics_log.txt.")
+    exit(1)
 start_local_time = df['Local_Timestamp'].iloc[0]
 end_local_time = df['Local_Timestamp'].iloc[-1]
 
