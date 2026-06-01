@@ -39,8 +39,10 @@ TARGET = telemetry_logger
 
 all: $(TARGET)
 
+PI_CROSS_COMPILE ?= /home/devcontainers/cross-pi-gcc-8.3.0-0/bin/arm-linux-gnueabihf-
+
 pi:
-	$(MAKE) CROSS_COMPILE=arm-linux-gnueabihf- SYSROOT=$$HOME/pi-sysroot all
+	$(MAKE) CROSS_COMPILE=$(PI_CROSS_COMPILE) SYSROOT=$$HOME/pi-sysroot all
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

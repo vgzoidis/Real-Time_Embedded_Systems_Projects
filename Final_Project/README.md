@@ -48,17 +48,22 @@ This will compile the `cJSON` library, the thread source codes, and link the `we
 ### Cross-Compilation for Raspberry Pi Zero W (ARMv6)
 A Raspberry Pi Zero W has limited RAM and processing power, making direct compilation of complex C projects slow and risky. It is a best practice to cross-compile the binary on your more powerful development PC.
 
-1. **Get the Toolchain:** Download the [AbhiTronix GCC 8.3.0 Raspberry Pi 1, Zero Toolchain](https://sourceforge.net/projects/raspberry-pi-cross-compilers/files/Raspberry%20Pi%20GCC%20Cross-Compiler%20Toolchains/Buster/GCC%208.3.0/Raspberry%20Pi%201%2C%20Zero/). Extract this somewhere accessible (e.g. `~/cross-pi-gcc-8.3.0-0` on WSL) and ensure its `bin/` directory is in your `$PATH`.
+1. **Get the Toolchain:** Download the [AbhiTronix GCC 8.3.0 Raspberry Pi 1, Zero Toolchain](https://sourceforge.net/projects/raspberry-pi-cross-compilers/files/Raspberry%20Pi%20GCC%20Cross-Compiler%20Toolchains/Buster/GCC%208.3.0/Raspberry%20Pi%201%2C%20Zero/). Extract this somewhere accessible (e.g. `~/cross-pi-gcc-8.3.0-0` on WSL).
 2. **Synchronize Sysroot:** The compiler needs to dynamically link `libwebsockets.so` and `pthread` meant for the Pi. You need to pull (`rsync`) the live `/usr` and `/lib` directories off the Pi to act as a "Sysroot".
    ```bash
    mkdir -p ~/pi-sysroot
    rsync -avz --rsync-path="sudo rsync" pi_user@192.168.X.X:/lib ~/pi-sysroot/
    rsync -avz --rsync-path="sudo rsync" pi_user@192.168.X.X:/usr ~/pi-sysroot/
    ```
-3. **Compile:** Run the custom `pi` target to inject the ARM Architecture configurations and linker sysroot paths automatically.
+3. **Compile:** Run the custom `pi` target to inject the ARM Architecture configurations and linker sysroot paths automatically. By default, the Makefile looks for the compiler at `/home/devcontainers/cross-pi-gcc-8.3.0-0/bin/arm-linux-gnueabihf-`. If your toolchain is located elsewhere, you can override it using `PI_CROSS_COMPILE`:
    ```bash
    make clean
+   
+   # If you are using the default devcontainer path:
    make pi
+   
+   # If you extracted the toolchain to a different path:
+   make pi PI_CROSS_COMPILE=~/my-custom-path/bin/arm-linux-gnueabihf-
    ```
 4. **Deploy:** Secure copy the compiled 32-bit `telemetry_logger` back to your Pi.
    ```bash
@@ -136,11 +141,11 @@ The application logic features a robust, self-healing producer thread. To test t
 1. Start the application (`./telemetry_logger`).
 2. Resolve the Firehose IP on the Pi:
    ```bash
-   getent hosts jetstream1.us-east.bsky.network
+   getent ahostsv4 jetstream1.us-east.bsky.network
    ```
 3. Simulate a WAN-only outage (without dropping LAN/SSH) using a blackhole route:
    ```bash
-   sudo ip route add blackhole <JETSTREAM_IP>/32
+   sudo ip route add blackhole <STREAM_IP>/32
    ```
    Do **not** execute `sudo ifconfig wlan0 down`, or you will instantly drop your SSH session.
 4. Observe reconnect behavior from the log file (no terminal multiplexer needed):

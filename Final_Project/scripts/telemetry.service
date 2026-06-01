@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Ensure you use identical paths where your executable and makefile output live!
-ExecStart=/home/vgzoidis/Real-Time_Embedded_Systems_Projects/Final_Project/telemetry_logger
-WorkingDirectory=/home/vgzoidis/Real-Time_Embedded_Systems_Projects/Final_Project
+ExecStart=/home/vgzoidis/telemetry_logger
+WorkingDirectory=/home/vgzoidis
 
 # This restart policy brings it back up if it crashes, reboots, or OOMs.
 Restart=always
