@@ -10,7 +10,7 @@
 \usepackage{hyperref}
 
 \title{Real-Time Embedded Systems: Bluesky Jetstream Telemetry Logger}
-\author{\textgreek{Ονοματεπώνυμο Φοιτητή / AEM}}
+\author{Zoidis Vasileios / 10652}
 \date{\today}
 
 \begin{document}
@@ -21,7 +21,7 @@
 \newpage
 
 \section{Introduction}
-The objective of this project is to develop a real-time multithreaded application in C designed to consume, parse, and monitor the Bluesky Jetstream Firehose over WebSockets. The application must guarantee execution stability over a contiguous 24-hour period on resource-constrained hardware such as a Raspberry Pi Zero W. Key challenges involve eliminating clock drift in periodic monitoring, preventing memory fragmentation or leaks, and reacting seamlessly to network bursts.
+The objective of this project is to develop a real-time multithreaded application in C designed to consume, parse, and monitor the Bluesky Jetstream Firehose over WebSockets. The application must guarantee execution stability over a contiguous 24-hour period on resource-constrained hardware such as a Raspberry Pi Zero W. Key challenges involve eliminating clock drift in periodic monitoring, preventing memory fragmentation or leaks, and reacting seamlessly to network bursts. The complete C source code and Python post-processing scripts are publicly available on \href{https://github.com/vgzoidis/Real-Time_Embedded_Systems_Projects/tree/main/Final_Project}{\underline{GitHub}}.
 
 \section{Phase 1: Probing the Firehose}
 Before designing the stringent C backend, it was imperative to understand the behavior of the Bluesky websocket firehose. We developed a Python probing script (\texttt{probe\_firehose.py}) to connect to \texttt{wss://jetstream1.us-east.bsky.network/subscribe} and observe the ingestion rate.
@@ -53,7 +53,7 @@ The Jetstream transmits various JSON schemas. Examples observed during the probi
   }
 }
 \end{minted}
-
+\newpage
 \textbf{3. Account Event:}
 \begin{minted}{json}
 {
@@ -218,8 +218,10 @@ A critical requirement for real-time telemetry systems is deterministic executio
     \label{fig:jitter}
 \end{figure}
 
+As visualized, the jitter is tightly bounded (execution is highly deterministic, with the median and mean average jitter resting perfectly at 0.00000 ms, and the 75th percentile reaching merely 0.01101 ms).
+
 \subsection{Network Burstiness vs. Buffer Occupancy}
-As recorded during the preliminary Firehose probing, network ingestion is irregular. The graph below displays the instantaneous incoming message frequency (measured in Hz) superimposed against the Consumer Thread's Ring Buffer occupancy percentage. 
+As recorded during the preliminary Firehose probing, network ingestion is irregular. To visualize the "burstiness" of the network and the efficiency of the queue, the incoming message frequency is superimposed against buffer usage in Figure \ref{fig:burstiness}.
 
 \begin{figure}[h!]
     \centering
@@ -228,7 +230,7 @@ As recorded during the preliminary Firehose probing, network ingestion is irregu
     \label{fig:burstiness}
 \end{figure}
 
-Despite massive network spikes arriving near 100 Hz, the buffer utilization remains firmly pinned to near 0\%. This serves as empirical evidence that the \texttt{pthreads} synchronization architecture and \texttt{cJSON} parsing loops run magnitudes faster than network latency, immediately draining the queue dynamically.
+The orange trajectory illustrates violent network bursts frequently exceeding 150 Hz, with peak transients crossing 350 Hz. Despite this, the green buffer occupancy metric remains mathematically near zero, recording a peak occupancy of only 0.78\%. This empirically proves the Consumer thread parses data magnitudes faster than maximum network ingress.
 
 \subsection{Compute Constraints (CPU Utilization)}
 To ensure Raspberry Pi Zero W viability, processor headroom is stringently mapped.
@@ -240,7 +242,7 @@ To ensure Raspberry Pi Zero W viability, processor headroom is stringently mappe
     \label{fig:cpu}
 \end{figure}
 
-The application commands less than 10\% background CPU overhead regardless of inbound traffic intensity, maintaining exceptional thermal headroom for embedded device limits.
+Figure \ref{fig:cpu} demonstrates excellent thermal and processing headroom. While momentary maximum CPU loads can spike to 100.00\% during the most intense network events, the application maintains a highly efficient average CPU load of just 10.39\% across the entire day. 
 
 \subsection{Statistical Robustness Evidence}
 To definitively prove the stability and real-time capability of the architecture, empirical statistics were calculated directly from the \texttt{metrics\_log.txt} dataset via \texttt{pandas}. The automated telemetry analysis confirms the following behavioral metrics during a high-stress test interval:
@@ -249,10 +251,30 @@ To definitively prove the stability and real-time capability of the architecture
 
 These tight execution boundaries, near-zero baseline jitter, and minuscule resource footprint confirm that the application is fully qualified for prolonged execution on the Raspberry Pi Zero W without hardware throttling or message drops.
 
-\section{Conclusion}
-By establishing upfront knowledge of network behavior via Python tooling, the C-backend was safely parameterized. The rigid usage of static array bounding, strict POSIX thread condition variables, and meticulous invocation of \texttt{cJSON} memory sweeps satisfies all criteria for embedded grade 24-hour stability.
+\section{Tools Used and Sources}
 
-\selectlanguage{greek}
-% Προσθέστε τυχόν ελληνικό κείμενο ή συμπεράσματα εδώ (προαιρετικά).
+This project combined embedded C development, network probing, and post-processing analysis tools to validate both correctness and long-run stability.
+
+\subsection{Tools Used}
+\begin{itemize}
+  \item \textbf{C toolchain:} \texttt{make}, \texttt{gcc}, \texttt{pthread}, and the Raspberry Pi ARM cross-compilation toolchain.
+  \item \textbf{Networking stack:} \texttt{libwebsockets} for the WebSocket producer and \texttt{iproute2} for outage simulation.
+  \item \textbf{JSON parsing:} \texttt{cJSON} for decoding Jetstream payloads.
+  \item \textbf{Validation and profiling:} \texttt{valgrind} for leak checking and \texttt{systemd} for service supervision.
+  \item \textbf{Python analysis:} \texttt{probe\_firehose.py} and \texttt{analyze\_metrics.py}, supported by \texttt{pandas}, \texttt{matplotlib}, and \texttt{numpy} from \texttt{requirements.txt}.
+\end{itemize}
+
+\subsection{Sources}
+\begin{itemize}
+  \item Bluesky Jetstream Firehose endpoint: \url{wss://jetstream1.us-east.bsky.network/subscribe}.
+  \item Raspberry Pi cross-compiler toolchain: \url{https://sourceforge.net/projects/raspberry-pi-cross-compilers/files/Raspberry%20Pi%20GCC%20Cross-Compiler%20Toolchains/Buster/GCC%208.3.0/Raspberry%20Pi%201%2C%20Zero/}.
+  \item Official \texttt{libwebsockets} project documentation and API references.
+  \item \texttt{cJSON} project documentation and source code.
+  \item Linux manual pages for \texttt{clock\_nanosleep()}, \texttt{fdatasync()}, \texttt{pthread\_cond\_wait()}, and \texttt{systemd} service management.
+  \item Local experiment logs and outputs: \texttt{metrics\_log.txt}, \texttt{telemetry\_logger.out}, and the generated statistics summary.
+\end{itemize}
+
+\section{Conclusion}
+The architecture of this real-time telemetry logger successfully implements memory-safe C programming with robust POSIX thread synchronization. The rigid usage of a properly sized 1024-slot circular buffer, explicit mutex state protection, and meticulous \texttt{cJSON} memory sweeps satisfy all criteria for embedded-grade stability, proven by the valgrind-verified absence of memory leaks and segmentation faults. Furthermore, empirical post-processing validates the system's efficiency on resource-constrained hardware. With an average CPU load of just 10.39\%, median execution jitter resting perfectly at 0.00000 ms, and peak buffer occupancy never exceeding 0.78\% even under heavy 350 Hz network transients, the system is demonstrably capable of autonomous, fault-tolerant data aggregation over continuous multi-day deployments.
 
 \end{document}
