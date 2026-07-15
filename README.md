@@ -6,11 +6,17 @@ This repository contains assignments and projects developed for the **Real-Time 
 
 ## Repository Structure
 
+### 📁 [Final_Project](./Final_Project)
+Real-time telemetry logger for the Bluesky Jetstream Firehose, implemented in C.
+* Uses a Producer-Consumer architecture with `libwebsockets`, `pthread`, and `cJSON`.
+* Includes the source code, build files, Python analysis scripts, and the final report.
+* Focuses on long-running execution, reconnect handling, and runtime metrics collection on resource-constrained hardware.
+
 ### 📁 [Project_1](./Project_1)
-Implementation of the **Producer-Consumer** model using POSIX Threads (`pthreads`). 
+Implementation of the **Producer-Consumer** model using POSIX Threads (`pthreads`).
 * Features a FIFO queue storing function pointers and arguments.
 * Explores parallel programming concepts by measuring and minimizing the waiting time across multiple producer and consumer threads.
-* Includes the complete source code (`prod-cons.c`), a PowerShell script for running experiments, and the final PDF report detailing performance metrics.
+* Includes the complete source code (`prod-cons.c`), a PowerShell script for running experiments, and the final PDF report.
 
 ### 📁 [Paper_Presentation](./Paper_Presentation)
 Slides and speaker notes for the scientific paper presentation. The presentation explores the critical role of Real-Time Operating Systems (RTOS) in supporting modern Cyber-Physical Systems (CPS). It is based on the IEEE paper:
